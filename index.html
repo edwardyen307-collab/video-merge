@@ -19,7 +19,7 @@ progress{width:100%;height:18px}#log{font-family:monospace;font-size:.75em;max-h
 @media(max-width:600px){body{margin:12px auto}li{flex-wrap:wrap}li .n{flex-basis:60%}button{padding:10px 14px}#merge,#save,#dl{width:100%;text-align:center;box-sizing:border-box}}
 #dl{display:inline-block;margin-top:8px;padding:10px 20px;background:#16a34a;color:#fff;border-radius:6px;text-decoration:none}
 </style></head><body>
-<h1>🎬 影片合併工具 <small style="font-size:.45em;color:#888">v2026-10-23b</small></h1>
+<h1>🎬 影片合併工具 <small style="font-size:.45em;color:#888">v2026-10-23c</small></h1>
 <p>全部在瀏覽器內處理（ffmpeg.wasm），影片不會上傳到任何伺服器。</p>
 <div class="warn">⚠️ 注意：瀏覽器記憶體有限（約 2GB），所有影片總大小建議在數百 MB 以內；若需重新編碼，速度會相當慢（單執行緒）。首次使用需下載約 32MB 的 ffmpeg 核心。<br>📱 iPhone/iPad 記憶體更有限，建議總大小保持在 500MB 以下。</div>
 <div class="card">
@@ -27,7 +27,7 @@ progress{width:100%;height:18px}#log{font-family:monospace;font-size:.75em;max-h
  <div style="margin-top:12px"><b>🔗 從網址加入</b>（每行一個直接影片檔網址，例如 https://…/video.mp4）
   <textarea id="urls" rows="3" style="width:100%;box-sizing:border-box;margin-top:4px" placeholder="https://example.com/video1.mp4&#10;https://example.com/video2.mp4"></textarea>
   <button id="addUrl">從網址加入</button>
-  <div class="tip">⚠️ 僅支援「直接影片檔」連結與 Grok Imagine 分享連結（grok.com/imagine/post/…）；YouTube、Instagram、TikTok、Facebook 等網頁連結不支援。對方網站須允許跨網域下載（CORS），否則請先把影片下載到手機/電腦再上傳。</div>
+  <div class="tip">⚠️ 僅支援「直接影片檔」連結；YouTube、Instagram、TikTok、Facebook、Grok 等網站的分享/網頁連結不支援。對方網站須允許跨網域下載（CORS），否則請先把影片下載到手機/電腦再上傳。</div>
   <div id="urlStatus" class="tip"></div></div>
  <ul id="list"></ul>
  <small>可拖曳項目或使用 ▲▼ 調整合併順序。所有影片需為相同格式（副檔名）。</small>
@@ -157,15 +157,6 @@ $('extract').onclick=async()=>{
  }catch(e){console.error(e);status('❌ 擷取失敗：'+(e&&e.message||e),true);if(f)for(const t of tmp)try{await f.deleteFile(t)}catch(_){}}
  finally{$('merge').disabled=files.length<2;$('extract').disabled=files.length<1}
 };
-// Grok Imagine 分享連結解析服務（Cloudflare Worker）。部署後填入網址，例如 'https://grok-resolver.<帳號>.workers.dev/'
-const GROK_RESOLVER='https://grok-resolver.edwardyen307.workers.dev/';
-const GROK_POST=/https?:\/\/(www\.)?grok\.com\/imagine\/(?:post\/)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
-async function resolveGrok(url){const m=url.match(GROK_POST);
- if(!GROK_RESOLVER||GROK_RESOLVER.startsWith('__'))throw new Error('Grok 分享連結解析服務尚未設定，請先把影片存到手機再上傳');
- let res;try{res=await fetch(GROK_RESOLVER+'?url='+encodeURIComponent(url))}catch(e){throw new Error('無法連線到 Grok 解析服務，請稍後再試')}
- let j={};try{j=await res.json()}catch(e){}
- if(!res.ok||!j.videoUrl)throw new Error('Grok 連結解析失敗：'+(j.message||j.error||('HTTP '+res.status))+(j.tries?'（'+j.tries.join(',')+'）':''));
- return {videoUrl:j.videoUrl,name:'grok_'+m[2].slice(0,8)+'.mp4'}}
 const VEXT=/^(mp4|m4v|mov|mkv|webm|avi|ts|flv)$/i,CT2EXT={'video/mp4':'mp4','video/quicktime':'mov','video/webm':'webm','video/x-matroska':'mkv','video/x-msvideo':'avi','video/mp2t':'ts','video/x-flv':'flv','video/x-m4v':'m4v'};
 function nameFromResp(url,res){let n='';const cd=res.headers.get('content-disposition')||'';
  const m=cd.match(/filename\*=UTF-8''([^;]+)/i)||cd.match(/filename="?([^";]+)"?/i);if(m)try{n=decodeURIComponent(m[1])}catch(e){n=m[1]}
@@ -176,7 +167,7 @@ function nameFromResp(url,res){let n='';const cd=res.headers.get('content-dispos
 async function fetchVideo(url,onProg){
  let u;try{u=new URL(url)}catch(e){throw new Error('網址格式不正確')}
  if(!/^https?:$/.test(u.protocol))throw new Error('只支援 http/https 網址');
- if(/(^|\.)(youtube\.com|youtu\.be|instagram\.com|tiktok\.com|facebook\.com|fb\.watch|x\.com|twitter\.com|vimeo\.com|bilibili\.com)$/i.test(u.hostname))throw new Error('不支援 YouTube/IG/TikTok 等影音網站的網頁連結，只能使用直接影片檔網址');
+ if(/(^|\.)(youtube\.com|youtu\.be|instagram\.com|tiktok\.com|facebook\.com|fb\.watch|x\.com|twitter\.com|vimeo\.com|bilibili\.com|grok\.com)$/i.test(u.hostname))throw new Error('不支援 YouTube/IG/TikTok/Grok 等網站的網頁連結，只能使用直接影片檔網址');
  let res;try{res=await fetch(u.href,{mode:'cors'})}catch(e){throw new Error('無法下載：對方網站不允許瀏覽器直接下載（CORS 限制）或網路錯誤。請先把影片下載到手機/電腦，再用「選擇檔案」上傳')}
  if(res.status===404)throw new Error('找不到檔案（404），請確認網址');
  if(!res.ok)throw new Error('伺服器回應錯誤（HTTP '+res.status+'）');
@@ -192,11 +183,10 @@ async function fetchVideo(url,onProg){
  return new File(chunks,info.name,{type:CT2EXT[info.ct]?info.ct:(mime[info.ext]||'video/mp4')})}
 $('addUrl').onclick=async()=>{const lines=$('urls').value.split(/\s*\n\s*/).map(x=>x.trim()).filter(Boolean);if(!lines.length)return;
  $('addUrl').disabled=true;const msgs=[],fail=[];
- for(let [i,url] of lines.entries()){try{let src=url,gname=null;
-   {const gm=url.match(GROK_POST);if(gm)url=gm[0];else{const um=url.match(/https?:\/\/\S+/i);if(um)url=um[0]}src=url}
-   if(GROK_POST.test(url)){$('urlStatus').textContent=`解析 Grok 連結中（${i+1}/${lines.length}）…`;const g=await resolveGrok(url);src=g.videoUrl;gname=g.name}
+ for(let [i,url] of lines.entries()){try{let src=url;
+   {const um=url.match(/https?:\/\/\S+/i);if(um)url=um[0];src=url}
    let f=await fetchVideo(src,(g,t)=>{$('urlStatus').textContent=`下載中（${i+1}/${lines.length}）：${fmt(g)}`+(t?` / ${fmt(t)}（${Math.round(g/t*100)}%）`:'')});
-   if(gname)f=new File([f],gname,{type:f.type});files.push(f);render();msgs.push('✅ 已加入：'+f.name+'（'+fmt(f.size)+'）')}
+   files.push(f);render();msgs.push('✅ 已加入：'+f.name+'（'+fmt(f.size)+'）')}
   catch(e){fail.push(url);msgs.push('❌ '+url+'：'+e.message)}}
  $('urlStatus').innerHTML='';msgs.forEach(m=>{const d=document.createElement('div');d.textContent=m;if(m[0]==='❌')d.className='err';$('urlStatus').append(d)});
  $('urls').value=fail.join('\n');$('addUrl').disabled=false};
