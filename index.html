@@ -61,7 +61,7 @@ $('drop').ondrop=e=>{e.preventDefault();$('drop').classList.remove('over');if(e.
 async function load(){if(ffmpeg)return ffmpeg;status('正在載入 ffmpeg 核心（約 32MB，首次較久）…');
  const f=new FFmpeg();f.on('log',({message})=>{logBuf.push(message);log(message)});
  f.on('progress',({progress})=>{if(progress>=0&&progress<=1)$('prog').value=progress});
- const base='https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+ const base='https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
  await f.load({classWorkerURL:await toBlobURL('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/814.ffmpeg.js','text/javascript'),
   coreURL:await toBlobURL(base+'/ffmpeg-core.js','text/javascript'),wasmURL:await toBlobURL(base+'/ffmpeg-core.wasm','application/wasm')});
  return ffmpeg=f}
