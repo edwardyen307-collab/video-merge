@@ -19,7 +19,7 @@ progress{width:100%;height:18px}#log{font-family:monospace;font-size:.75em;max-h
 @media(max-width:600px){body{margin:12px auto}li{flex-wrap:wrap}li .n{flex-basis:60%}button{padding:10px 14px}#merge,#save,#dl{width:100%;text-align:center;box-sizing:border-box}}
 #dl{display:inline-block;margin-top:8px;padding:10px 20px;background:#16a34a;color:#fff;border-radius:6px;text-decoration:none}
 </style></head><body>
-<h1>🎬 影片合併工具 <small style="font-size:.45em;color:#888">v2026-10-23d</small></h1>
+<h1>🎬 影片合併工具 <small style="font-size:.45em;color:#888">v2026-10-23e</small></h1>
 <p>全部在瀏覽器內處理（ffmpeg.wasm），影片不會上傳到任何伺服器。</p>
 <div class="warn">⚠️ 注意：瀏覽器記憶體有限（約 2GB），所有影片總大小建議在數百 MB 以內；若需重新編碼，速度會相當慢（單執行緒）。首次使用需下載約 32MB 的 ffmpeg 核心。<br>📱 iPhone/iPad 記憶體更有限，建議總大小保持在 500MB 以下。</div>
 <div class="card">
@@ -80,14 +80,14 @@ async function load(){if(ffmpeg)return ffmpeg;status('正在載入 ffmpeg 核心
 let logBuf=[];
 async function probe(f,name){logBuf=[];await f.exec(['-hide_banner','-i',name]);const lines=logBuf.filter(l=>!/attached pic|Video: (mjpeg|png|bmp)/i.test(l)),t=lines.join('\n');
  const vl=lines.find(l=>/Stream #.*Video: /.test(l))||'',al=lines.find(l=>/Stream #.*Audio: /.test(l))||'';
- const v=vl.match(/Video: (\w+)/),wh=vl.match(/, (\d{2,5})x(\d{2,5})/),pf=vl.match(/Video: \w+[^,]*, (\w+)/),fps=vl.match(/([\d.]+) fps/),tbn=vl.match(/([\d.]+)k? tbn/);
+ const prof=vl.match(/Video: \w+ \(([^)]+)\)/),v=vl.match(/Video: (\w+)/),wh=vl.match(/, (\d{2,5})x(\d{2,5})/),pf=vl.match(/Video: \w+[^,]*, (\w+)/),fps=vl.match(/([\d.]+) fps/),tbn=vl.match(/([\d.]+)k? tbn/);
  const rot=t.match(/rotation of (-?[\d.]+) degrees/),r=rot?((Math.round(-parseFloat(rot[1]))%360)+360)%360:0;
  const a=al.match(/Audio: (\w+)/),sr=al.match(/(\d+) Hz/),ch=al.match(/Hz, ([^,]+),/),fm=t.match(/Input #0, ([^,]+),/),du=t.match(/Duration: (\d+):(\d+):([\d.]+)/);
  const w=wh?+wh[1]:0,h=wh?+wh[2]:0,sw=r===90||r===270;
- return {v:v?v[1]:null,w,h,dw:sw?h:w,dh:sw?w:h,rot:r,pix:pf?pf[1]:null,fps:fps?fps[1]:null,tbn:tbn?tbn[1]:null,a:a?a[1]:null,sr:sr?+sr[1]:null,ch:ch?ch[1].trim():null,fmt:fm?fm[1]:null,
+ return {prof:prof?prof[1]:null,v:v?v[1]:null,w,h,dw:sw?h:w,dh:sw?w:h,rot:r,pix:pf?pf[1]:null,fps:fps?fps[1]:null,tbn:tbn?tbn[1]:null,a:a?a[1]:null,sr:sr?+sr[1]:null,ch:ch?ch[1].trim():null,fmt:fm?fm[1]:null,
   dur:du?(+du[1])*3600+(+du[2])*60+parseFloat(du[3]):0}}
 // 規格比對鍵：顯示尺寸、旋轉、編碼、像素格式、幀率、音訊、容器
-const specKey=x=>[x.ext,x.v,x.dw,x.dh,x.rot,x.pix,x.fps,x.a||'-',x.a?x.sr:'',x.a?x.ch:''].join('|');
+const specKey=x=>[x.ext,x.v,x.prof,x.w,x.h,x.tbn,x.dw,x.dh,x.rot,x.pix,x.fps,x.a||'-',x.a?x.sr:'',x.a?x.ch:''].join('|');
 // ffmpeg.wasm 能編碼的格式
 const VENC={h264:['libx264','-preset','ultrafast','-crf','20'],mpeg4:['mpeg4','-q:v','3'],vp8:['libvpx','-b:v','2M','-deadline','realtime','-cpu-used','8'],vp9:['libvpx-vp9','-b:v','2M','-deadline','realtime','-cpu-used','8','-row-mt','1']};
 const AENC={aac:['aac','-b:a','160k'],mp3:['libmp3lame','-b:a','192k'],opus:['libopus','-b:a','128k'],vorbis:['libvorbis','-q:a','5']};
@@ -107,7 +107,7 @@ $('merge').onclick=async()=>{
   const canNorm=M.v&&VENC[M.v]&&(!M.a||AENC[M.a])&&M.rot===0&&M.dw>0&&M.pix&&M.fps;
   log(`多數規格: ${M.v} ${M.dw}×${M.dh} ${M.pix} ${M.fps}fps 音訊=${M.a||'無'} ${M.sr||''} ${M.ch||''} 容器=${e0}；需轉換: ${bad.map(i=>i+1).join(',')||'無'}`);
   let ok=false,reenc=false,conv=0;const cat=names.slice();
-  if(bad.length===0||canNorm){
+  if(bad.length===0){
    try{
     for(const i of bad){const x=info[i];conv++;
      status(`第 ${i+1} 支影片規格不同，正在轉換為 ${M.dw}×${M.dh}（${M.v}${M.a?'/'+M.a:''}, ${M.fps}fps）…（${conv}/${bad.length}）`);$('prog').value=0;
@@ -125,24 +125,24 @@ $('merge').onclick=async()=>{
      const r=await f.exec(args);if(r!==0)throw new Error('第 '+(i+1)+' 支影片轉換失敗');temps.push(tn);cat[i]=tn}
     await f.writeFile('list.txt',cat.map(n=>`file '${n}'`).join('\n'));
     status(bad.length?`已轉換 ${bad.length} 支影片，以快速模式合併中…`:'格式一致，以快速模式（不重新編碼）合併中…');$('prog').value=0;
-    const r=await f.exec(['-f','concat','-safe','0','-i','list.txt','-map','0:v:0','-map','0:a:0?','-c','copy','-dn','-sn',...(['mp4','mov'].includes(e0)?['-movflags','+faststart']:[]),out]);ok=r===0;
+    const r=await f.exec(['-f','concat','-safe','0','-i','list.txt','-map','0:v:0','-map','0:a:0?','-c','copy','-dn','-sn','-fflags','+genpts','-avoid_negative_ts','make_zero',...(['mp4','mov'].includes(e0)?['-movflags','+faststart']:[]),out]);ok=r===0;
     if(ok){const d=await f.readFile(out);ok=d.length>1000}
    }catch(e){log('轉換/快速合併失敗：'+(e&&e.message||e));ok=false}
    if(!ok)log('快速合併失敗，改用全部重新編碼…')}
-  else log('多數規格的編碼（'+M.v+'/'+(M.a||'無音訊')+(M.rot?'，含旋轉':'')+'）無法在瀏覽器中編碼，改為全部重新編碼為 H.264/AAC');
+  else log(bad.length?'影片規格不一致，為確保播放順暢（iPhone 相容），全部統一重新編碼':'多數規格的編碼（'+M.v+'/'+(M.a||'無音訊')+(M.rot?'，含旋轉':'')+'）無法在瀏覽器中編碼，改為全部重新編碼為 H.264/AAC');
   if(!ok){reenc=true;try{await f.deleteFile(out)}catch(e){}
-   if(!canNorm&&e0!=='webm'){e0='mp4';out='output.mp4'}
-   status('⚠️ 改為全部重新編碼合併（H.264/AAC），速度較慢，請耐心等候…');$('prog').value=0;
-   const W=M.dw||1280,H=M.dh||720,fps=M.fps||30,anyA=info.some(x=>x.a);
+   if(e0!=='webm'){e0='mp4';out='output.mp4'}
+   status(bad.length?`偵測到 ${bad.length} 支影片規格不同，正在將全部影片統一轉換為 ${M.dw||1280}×${M.dh||720} 並合併（確保 iPhone 播放順暢），請耐心等候…`:'⚠️ 改為全部重新編碼合併（H.264/AAC），速度較慢，請耐心等候…');$('prog').value=0;
+   const W=(M.dw||1280)&~1,H=(M.dh||720)&~1,fps=M.fps&&+M.fps<=60?M.fps:30,anyA=info.some(x=>x.a),SR=M.sr===48000?48000:44100;
    const args=[];names.forEach(n=>args.push('-i',n));let fc='',cc='';
-   info.forEach((x,i)=>{fc+=`[${i}:v:0]scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},format=yuv420p[v${i}];`;
-    if(anyA)fc+=(x.a?`[${i}:a:0]aformat=sample_rates=44100:channel_layouts=stereo`:`anullsrc=r=44100:cl=stereo,atrim=duration=${x.dur||1}`)+`[a${i}];`;cc+=`[v${i}]`+(anyA?`[a${i}]`:'')});
+   info.forEach((x,i)=>{fc+=`[${i}:v:0]setpts=PTS-STARTPTS,scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},format=yuv420p[v${i}];`;
+    if(anyA)fc+=(x.a?`[${i}:a:0]asetpts=PTS-STARTPTS,aresample=${SR}:async=1:first_pts=0,aformat=sample_rates=${SR}:channel_layouts=stereo,apad,atrim=duration=${x.dur||1}`:`anullsrc=r=${SR}:cl=stereo,atrim=duration=${x.dur||1}`)+`[a${i}];`;cc+=`[v${i}]`+(anyA?`[a${i}]`:'')});
    fc+=`${cc}concat=n=${names.length}:v=1:a=${anyA?1:0}[v]`+(anyA?'[a]':'');
    args.push('-filter_complex',fc,'-map','[v]');if(anyA)args.push('-map','[a]');
    if(e0==='webm')args.push('-c:v','libvpx','-b:v','2M','-deadline','realtime','-cpu-used','8',...(anyA?['-c:a','libvorbis']:[]));
-   else args.push('-c:v','libx264','-preset','ultrafast','-crf','23',...(anyA?['-c:a','aac','-b:a','128k']:[]));
+   else args.push('-c:v','libx264','-preset','veryfast','-crf','21','-profile:v','high','-level:v','4.1','-pix_fmt','yuv420p','-r',String(fps),'-fps_mode','cfr','-g',String(Math.round(fps*2)),'-video_track_timescale','90000',...(anyA?['-c:a','aac','-b:a','160k','-ar',String(SR),'-ac','2']:[]));
    if(['mp4','m4v','mov'].includes(e0))args.push('-movflags','+faststart');
-   args.push(out);const r=await f.exec(args);if(r!==0)throw new Error('重新編碼失敗（ffmpeg 結束代碼 '+r+'）')}
+   args.push('-map_metadata','-1',out);const r=await f.exec(args);if(r!==0)throw new Error('重新編碼失敗（ffmpeg 結束代碼 '+r+'）')}
   window.__mergeInfo={major:M,converted:bad.map(i=>i+1),reenc,totalDur:info.reduce((s,x)=>s+x.dur,0)};
   const data=await f.readFile(out);const blob=new Blob([data.buffer],{type:mime[e0]||'video/'+e0});lastUrl=URL.createObjectURL(blob);
   $('prog').value=1;status('✅ 合併完成'+(reenc?'（已全部重新編碼）':conv?`（已自動轉換 ${conv} 支影片，快速模式）`:'（快速模式）')+'，大小 '+fmt(blob.size));
