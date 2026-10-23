@@ -24,6 +24,11 @@ progress{width:100%;height:18px}#log{font-family:monospace;font-size:.75em;max-h
 <div class="warn">⚠️ 注意：瀏覽器記憶體有限（約 2GB），所有影片總大小建議在數百 MB 以內；若需重新編碼，速度會相當慢（單執行緒）。首次使用需下載約 32MB 的 ffmpeg 核心。<br>📱 iPhone/iPad 記憶體更有限，建議總大小保持在 500MB 以下。</div>
 <div class="card">
  <div id="drop">點此選擇或拖曳多個影片檔到這裡<input id="file" type="file" accept="video/*" multiple hidden></div>
+ <div style="margin-top:12px"><b>🔗 從網址加入</b>（每行一個直接影片檔網址，例如 https://…/video.mp4）
+  <textarea id="urls" rows="3" style="width:100%;box-sizing:border-box;margin-top:4px" placeholder="https://example.com/video1.mp4&#10;https://example.com/video2.mp4"></textarea>
+  <button id="addUrl">從網址加入</button>
+  <div class="tip">⚠️ 僅支援「直接影片檔」連結；YouTube、Instagram、TikTok、Facebook 等網頁連結不支援。對方網站須允許跨網域下載（CORS），否則請先把影片下載到手機/電腦再上傳。</div>
+  <div id="urlStatus" class="tip"></div></div>
  <ul id="list"></ul>
  <small>可拖曳項目或使用 ▲▼ 調整合併順序。所有影片需為相同格式（副檔名）。</small>
 </div>
@@ -44,7 +49,7 @@ const $=id=>document.getElementById(id);
 const isIOS=/iP(hone|ad|od)/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 let files=[],ffmpeg=null,dragIdx=null,lastUrl=null;
 const ext=f=>(f.name.split('.').pop()||'').toLowerCase();
-const fmt=b=>b>1e9?(b/1e9).toFixed(2)+' GB':(b/1e6).toFixed(1)+' MB';
+const fmt=b=>b>1e9?(b/1e9).toFixed(2)+' GB':b>=1e6?(b/1e6).toFixed(1)+' MB':Math.max(1,Math.round(b/1e3))+' KB';
 function status(t,err){$('status').innerHTML=err?'<span class="err">'+t+'</span>':t}
 function log(t){const l=$('log');l.style.display='block';l.textContent+=t+'\n';l.scrollTop=l.scrollHeight}
 function render(){const ul=$('list');ul.innerHTML='';
@@ -152,4 +157,35 @@ $('extract').onclick=async()=>{
  }catch(e){console.error(e);status('❌ 擷取失敗：'+(e&&e.message||e),true);if(f)for(const t of tmp)try{await f.deleteFile(t)}catch(_){}}
  finally{$('merge').disabled=files.length<2;$('extract').disabled=files.length<1}
 };
+const VEXT=/^(mp4|m4v|mov|mkv|webm|avi|ts|flv)$/i,CT2EXT={'video/mp4':'mp4','video/quicktime':'mov','video/webm':'webm','video/x-matroska':'mkv','video/x-msvideo':'avi','video/mp2t':'ts','video/x-flv':'flv','video/x-m4v':'m4v'};
+function nameFromResp(url,res){let n='';const cd=res.headers.get('content-disposition')||'';
+ const m=cd.match(/filename\*=UTF-8''([^;]+)/i)||cd.match(/filename="?([^";]+)"?/i);if(m)try{n=decodeURIComponent(m[1])}catch(e){n=m[1]}
+ if(!n)try{n=decodeURIComponent(new URL(url).pathname.split('/').pop()||'')}catch(e){}
+ const ct=(res.headers.get('content-type')||'').split(';')[0].trim().toLowerCase();let e=(n.match(/\.([a-z0-9]+)$/i)||[])[1];
+ if(!e||!VEXT.test(e)){e=CT2EXT[ct]||'mp4';n=(n||'video').replace(/\.[^.]*$/,'')+'.'+e}
+ return {name:n,ext:e.toLowerCase(),ct}}
+async function fetchVideo(url,onProg){
+ let u;try{u=new URL(url)}catch(e){throw new Error('網址格式不正確')}
+ if(!/^https?:$/.test(u.protocol))throw new Error('只支援 http/https 網址');
+ if(/(^|\.)(youtube\.com|youtu\.be|instagram\.com|tiktok\.com|facebook\.com|fb\.watch|x\.com|twitter\.com|vimeo\.com|bilibili\.com)$/i.test(u.hostname))throw new Error('不支援 YouTube/IG/TikTok 等影音網站的網頁連結，只能使用直接影片檔網址');
+ let res;try{res=await fetch(u.href,{mode:'cors'})}catch(e){throw new Error('無法下載：對方網站不允許瀏覽器直接下載（CORS 限制）或網路錯誤。請先把影片下載到手機/電腦，再用「選擇檔案」上傳')}
+ if(res.status===404)throw new Error('找不到檔案（404），請確認網址');
+ if(!res.ok)throw new Error('伺服器回應錯誤（HTTP '+res.status+'）');
+ const info=nameFromResp(u.href,res),limit=isIOS?5e8:1.5e9;
+ if(/^(text\/|application\/json|image\/)/.test(info.ct))throw new Error('這不是影片檔（內容類型：'+info.ct+'），可能是網頁連結而非直接影片檔');
+ const len=+res.headers.get('content-length')||0;if(len>limit)throw new Error('檔案太大（'+fmt(len)+'），超過瀏覽器可處理的上限（約 '+fmt(limit)+'）');
+ const rd=res.body&&res.body.getReader?res.body.getReader():null;let chunks=[],got=0;
+ if(rd){for(;;){const {done,value}=await rd.read();if(done)break;chunks.push(value);got+=value.length;
+   if(got>limit){rd.cancel();throw new Error('檔案太大（超過約 '+fmt(limit)+'）')}onProg(got,len)}}
+ else{const b=await res.arrayBuffer();chunks=[b];got=b.byteLength}
+ const head=new Uint8Array(await new Blob(chunks.slice(0,1)).slice(0,64).arrayBuffer()),hs=String.fromCharCode(...head).toLowerCase();
+ if(hs.includes('<!doctype')||hs.includes('<html'))throw new Error('下載到的是網頁而不是影片檔，請使用直接影片檔網址');
+ return new File(chunks,info.name,{type:CT2EXT[info.ct]?info.ct:(mime[info.ext]||'video/mp4')})}
+$('addUrl').onclick=async()=>{const lines=$('urls').value.split(/\s*\n\s*/).map(x=>x.trim()).filter(Boolean);if(!lines.length)return;
+ $('addUrl').disabled=true;const msgs=[],fail=[];
+ for(const [i,url] of lines.entries()){try{const f=await fetchVideo(url,(g,t)=>{$('urlStatus').textContent=`下載中（${i+1}/${lines.length}）：${fmt(g)}`+(t?` / ${fmt(t)}（${Math.round(g/t*100)}%）`:'')});
+   files.push(f);render();msgs.push('✅ 已加入：'+f.name+'（'+fmt(f.size)+'）')}
+  catch(e){fail.push(url);msgs.push('❌ '+url+'：'+e.message)}}
+ $('urlStatus').innerHTML='';msgs.forEach(m=>{const d=document.createElement('div');d.textContent=m;if(m[0]==='❌')d.className='err';$('urlStatus').append(d)});
+ $('urls').value=fail.join('\n');$('addUrl').disabled=false};
 </script></body></html>
