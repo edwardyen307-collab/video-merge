@@ -13,11 +13,14 @@ button{padding:6px 10px;border:0;border-radius:6px;background:#e3e6ea;cursor:poi
 #merge{background:#2563eb;color:#fff;font-size:1.1em;padding:10px 24px}
 progress{width:100%;height:18px}#log{font-family:monospace;font-size:.75em;max-height:160px;overflow:auto;background:#111;color:#9f9;padding:8px;white-space:pre-wrap;display:none}
 .err{color:#c00;font-weight:bold}video{width:100%;margin-top:8px}
+#save{display:inline-block;margin:8px 8px 0 0;padding:12px 22px;background:#2563eb;color:#fff;font-size:1.1em;border-radius:6px}
+.tip{font-size:.9em;color:#444;margin-top:6px}
+@media(max-width:600px){body{margin:12px auto}li{flex-wrap:wrap}li .n{flex-basis:60%}button{padding:10px 14px}#merge,#save,#dl{width:100%;text-align:center;box-sizing:border-box}}
 #dl{display:inline-block;margin-top:8px;padding:10px 20px;background:#16a34a;color:#fff;border-radius:6px;text-decoration:none}
 </style></head><body>
 <h1>🎬 影片合併工具</h1>
 <p>全部在瀏覽器內處理（ffmpeg.wasm），影片不會上傳到任何伺服器。</p>
-<div class="warn">⚠️ 注意：瀏覽器記憶體有限（約 2GB），所有影片總大小建議在數百 MB 以內；若需重新編碼，速度會相當慢（單執行緒）。首次使用需下載約 32MB 的 ffmpeg 核心。</div>
+<div class="warn">⚠️ 注意：瀏覽器記憶體有限（約 2GB），所有影片總大小建議在數百 MB 以內；若需重新編碼，速度會相當慢（單執行緒）。首次使用需下載約 32MB 的 ffmpeg 核心。<br>📱 iPhone/iPad 記憶體更有限，建議總大小保持在 500MB 以下。</div>
 <div class="card">
  <div id="drop">點此選擇或拖曳多個影片檔到這裡<input id="file" type="file" accept="video/*" multiple hidden></div>
  <ul id="list"></ul>
@@ -35,6 +38,7 @@ progress{width:100%;height:18px}#log{font-family:monospace;font-size:.75em;max-h
 <script>
 const {FFmpeg}=FFmpegWASM,{fetchFile,toBlobURL}=FFmpegUtil;
 const $=id=>document.getElementById(id);
+const isIOS=/iP(hone|ad|od)/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 let files=[],ffmpeg=null,dragIdx=null,lastUrl=null;
 const ext=f=>(f.name.split('.').pop()||'').toLowerCase();
 const fmt=b=>b>1e9?(b/1e9).toFixed(2)+' GB':(b/1e6).toFixed(1)+' MB';
@@ -52,7 +56,7 @@ function render(){const ul=$('list');ul.innerHTML='';
   ul.append(li)});
  const total=files.reduce((a,f)=>a+f.size,0);
  $('merge').disabled=files.length<2;
- if(total>1.5e9)status('⚠️ 總大小 '+fmt(total)+'，可能超出瀏覽器記憶體上限而失敗。',true);
+ if(total>(isIOS?5e8:1.5e9))status('⚠️ 總大小 '+fmt(total)+'，可能超出瀏覽器記憶體上限而失敗。',true);
 }
 function add(list){for(const f of list){if(!f.type.startsWith('video/')&&!/\.(mp4|mov|mkv|webm|avi|m4v|ts|flv)$/i.test(f.name))continue;files.push(f)}render()}
 $('drop').onclick=()=>$('file').click();$('file').onchange=e=>{add(e.target.files);e.target.value=''};
@@ -100,7 +104,14 @@ $('merge').onclick=async()=>{
    args.push(out);const r=await f.exec(args);if(r!==0)throw new Error('重新編碼失敗（ffmpeg 結束代碼 '+r+'）')}
   const data=await f.readFile(out);const blob=new Blob([data.buffer],{type:mime[e0]||'video/'+e0});lastUrl=URL.createObjectURL(blob);
   $('prog').value=1;status('✅ 合併完成'+(reenc?'（已重新編碼）':'（快速模式）')+'，大小 '+fmt(blob.size));
-  $('result').innerHTML=`<video controls src="${lastUrl}"></video><a id="dl" href="${lastUrl}" download="merged.${e0}">⬇ 下載合併影片</a>`;
+  const mt=blob.type,photosOK=['mp4','m4v','mov'].includes(e0);
+  const file=new File([blob],'merged.'+(e0==='m4v'?'mp4':e0),{type:mt});
+  let canShare=false;try{canShare=!!(navigator.canShare&&navigator.canShare({files:[file]}))}catch(e){}
+  $('result').innerHTML=`<video controls playsinline src="${lastUrl}"></video><div>${canShare?'<button id="save">📥 儲存到相簿</button>':''}<a id="dl" href="${lastUrl}" download="merged.${e0}">⬇ 下載合併影片</a></div>`+
+   (canShare&&photosOK?'<div class="tip">點「儲存到相簿」後，在分享選單中選擇「儲存影片」即可存入「照片」App。</div>':'')+
+   (!photosOK?'<div class="tip">⚠️ 「照片」App 只接受 MP4/MOV 格式；此格式（'+e0+'）只能存到「檔案」App。如需存入相簿，請改用 MP4 影片合併。</div>':'')+
+   (isIOS&&!canShare?'<div class="tip">此瀏覽器不支援分享檔案，請點「下載」後在「檔案」App 中開啟，再分享並選「儲存影片」。</div>':'');
+  if(canShare)$('save').onclick=()=>{navigator.share({files:[file]}).catch(e=>{if(e.name!=='AbortError')status('❌ 分享失敗：'+e.message+'，請改用下載。',true)})};
  }catch(e){console.error(e);status('❌ 發生錯誤：'+(e&&e.message||e)+'（可能是檔案過大導致記憶體不足，或格式不支援）',true)}
  finally{if(f)for(const n of [...names,'list.txt',out]){try{await f.deleteFile(n)}catch(e){}}$('merge').disabled=files.length<2}
 };
