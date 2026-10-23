@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>影片合併工具</title>
+<style>
+body{font-family:system-ui,"Noto Sans TC",sans-serif;max-width:760px;margin:24px auto;padding:0 16px;background:#f6f7f9;color:#222}
+h1{font-size:1.5em}.card{background:#fff;border-radius:10px;padding:16px;margin:12px 0;box-shadow:0 1px 3px #0002}
+.warn{background:#fff8e1;border-left:4px solid #f5a623;padding:8px 12px;font-size:.9em}
+#drop{border:2px dashed #99a;border-radius:10px;padding:24px;text-align:center;cursor:pointer}
+#drop.over{background:#eef}
+ul{list-style:none;padding:0}li{display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #ddd;border-radius:6px;margin:6px 0;background:#fafafa;cursor:grab}
+li.dragging{opacity:.4}li .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+button{padding:6px 10px;border:0;border-radius:6px;background:#e3e6ea;cursor:pointer}button:disabled{opacity:.5;cursor:default}
+#merge{background:#2563eb;color:#fff;font-size:1.1em;padding:10px 24px}
+progress{width:100%;height:18px}#log{font-family:monospace;font-size:.75em;max-height:160px;overflow:auto;background:#111;color:#9f9;padding:8px;white-space:pre-wrap;display:none}
+.err{color:#c00;font-weight:bold}video{width:100%;margin-top:8px}
+#dl{display:inline-block;margin-top:8px;padding:10px 20px;background:#16a34a;color:#fff;border-radius:6px;text-decoration:none}
+</style></head><body>
+<h1>🎬 影片合併工具</h1>
+<p>全部在瀏覽器內處理（ffmpeg.wasm），影片不會上傳到任何伺服器。</p>
+<div class="warn">⚠️ 注意：瀏覽器記憶體有限（約 2GB），所有影片總大小建議在數百 MB 以內；若需重新編碼，速度會相當慢（單執行緒）。首次使用需下載約 32MB 的 ffmpeg 核心。</div>
+<div class="card">
+ <div id="drop">點此選擇或拖曳多個影片檔到這裡<input id="file" type="file" accept="video/*" multiple hidden></div>
+ <ul id="list"></ul>
+ <small>可拖曳項目或使用 ▲▼ 調整合併順序。所有影片需為相同格式（副檔名）。</small>
+</div>
+<div class="card">
+ <button id="merge" disabled>合併</button>
+ <div id="status" style="margin-top:10px"></div>
+ <progress id="prog" value="0" max="1" style="display:none"></progress>
+ <div id="log"></div>
+ <div id="result"></div>
+</div>
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
+<script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
+<script>
+const {FFmpeg}=FFmpegWASM,{fetchFile,toBlobURL}=FFmpegUtil;
+const $=id=>document.getElementById(id);
+let files=[],ffmpeg=null,dragIdx=null,lastUrl=null;
+const ext=f=>(f.name.split('.').pop()||'').toLowerCase();
+const fmt=b=>b>1e9?(b/1e9).toFixed(2)+' GB':(b/1e6).toFixed(1)+' MB';
+function status(t,err){$('status').innerHTML=err?'<span class="err">'+t+'</span>':t}
+function log(t){const l=$('log');l.style.display='block';l.textContent+=t+'\n';l.scrollTop=l.scrollHeight}
+function render(){const ul=$('list');ul.innerHTML='';
+ files.forEach((f,i)=>{const li=document.createElement('li');li.draggable=true;
+  li.innerHTML=`<b>${i+1}.</b><span class="n"></span><small>${fmt(f.size)}</small>`;
+  li.querySelector('.n').textContent=f.name;
+  [['▲',-1],['▼',1]].forEach(([s,d])=>{const b=document.createElement('button');b.textContent=s;b.disabled=i+d<0||i+d>=files.length;b.onclick=()=>{[files[i],files[i+d]]=[files[i+d],files[i]];render()};li.append(b)});
+  const x=document.createElement('button');x.textContent='✕';x.onclick=()=>{files.splice(i,1);render()};li.append(x);
+  li.ondragstart=()=>{dragIdx=i;li.classList.add('dragging')};li.ondragend=()=>li.classList.remove('dragging');
+  li.ondragover=e=>e.preventDefault();
+  li.ondrop=e=>{e.preventDefault();e.stopPropagation();if(dragIdx===null)return;const [m]=files.splice(dragIdx,1);files.splice(i,0,m);dragIdx=null;render()};
+  ul.append(li)});
+ const total=files.reduce((a,f)=>a+f.size,0);
+ $('merge').disabled=files.length<2;
+ if(total>1.5e9)status('⚠️ 總大小 '+fmt(total)+'，可能超出瀏覽器記憶體上限而失敗。',true);
+}
+function add(list){for(const f of list){if(!f.type.startsWith('video/')&&!/\.(mp4|mov|mkv|webm|avi|m4v|ts|flv)$/i.test(f.name))continue;files.push(f)}render()}
+$('drop').onclick=()=>$('file').click();$('file').onchange=e=>{add(e.target.files);e.target.value=''};
+$('drop').ondragover=e=>{e.preventDefault();$('drop').classList.add('over')};$('drop').ondragleave=()=>$('drop').classList.remove('over');
+$('drop').ondrop=e=>{e.preventDefault();$('drop').classList.remove('over');if(e.dataTransfer.files.length)add(e.dataTransfer.files)};
+async function load(){if(ffmpeg)return ffmpeg;status('正在載入 ffmpeg 核心（約 32MB，首次較久）…');
+ const f=new FFmpeg();f.on('log',({message})=>{logBuf.push(message);log(message)});
+ f.on('progress',({progress})=>{if(progress>=0&&progress<=1)$('prog').value=progress});
+ const base='https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+ await f.load({classWorkerURL:await toBlobURL('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/814.ffmpeg.js','text/javascript'),
+  coreURL:await toBlobURL(base+'/ffmpeg-core.js','text/javascript'),wasmURL:await toBlobURL(base+'/ffmpeg-core.wasm','application/wasm')});
+ return ffmpeg=f}
+let logBuf=[];
+async function probe(f,name){logBuf=[];await f.exec(['-hide_banner','-i',name]);const t=logBuf.join('\n');
+ const v=t.match(/Video: (\w+).*?, (\d{2,5})x(\d{2,5})/),a=t.match(/Audio: (\w+)/),fps=t.match(/([\d.]+) fps/);
+ return {v:v?v[1]:null,w:v?+v[2]:0,h:v?+v[3]:0,a:a?a[1]:null,fps:fps?fps[1]:null}}
+const mime={mp4:'video/mp4',m4v:'video/mp4',mov:'video/quicktime',mkv:'video/x-matroska',webm:'video/webm',avi:'video/x-msvideo',ts:'video/mp2t',flv:'video/x-flv'};
+$('merge').onclick=async()=>{
+ const e0=ext(files[0]);if(files.some(f=>ext(f)!==e0))return status('所有影片必須是相同格式（目前混合了不同副檔名）。',true);
+ $('merge').disabled=true;$('result').innerHTML='';$('log').textContent='';$('prog').style.display='block';$('prog').value=0;
+ if(lastUrl)URL.revokeObjectURL(lastUrl);
+ const out='output.'+e0,names=files.map((_,i)=>`in${i}.${e0}`);
+ let f;try{
+  f=await load();status('正在讀取影片…');
+  for(let i=0;i<files.length;i++){await f.writeFile(names[i],await fetchFile(files[i]));$('prog').value=(i+1)/files.length}
+  const info=[];for(const n of names)info.push(await probe(f,n));log('探測結果: '+JSON.stringify(info));
+  const k=x=>[x.v,x.w,x.h,x.a,x.fps].join('|');const same=info.every(x=>k(x)===k(info[0]));
+  await f.writeFile('list.txt',names.map(n=>`file '${n}'`).join('\n'));
+  let ok=false,reenc=false;
+  if(same){status('格式一致，以快速模式（不重新編碼）合併中…');$('prog').value=0;
+   try{const r=await f.exec(['-f','concat','-safe','0','-i','list.txt','-c','copy',out]);ok=r===0;
+    if(ok){const d=await f.readFile(out);ok=d.length>1000}}catch(e){ok=false}
+   if(!ok)log('快速合併失敗，改用重新編碼…')}
+  if(!ok){reenc=true;try{await f.deleteFile(out)}catch(e){}
+   status('⚠️ 影片的編碼/解析度不一致（或快速合併失敗），改為重新編碼合併，速度較慢，請耐心等候…');$('prog').value=0;
+   const W=info[0].w||1280,H=info[0].h||720,fps=info[0].fps||30,allA=info.every(x=>x.a);
+   const args=[];names.forEach(n=>args.push('-i',n));let fc='',cat='';
+   info.forEach((_,i)=>{fc+=`[${i}:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},format=yuv420p[v${i}];`;
+    if(allA)fc+=`[${i}:a]aformat=sample_rates=44100:channel_layouts=stereo[a${i}];`;cat+=`[v${i}]`+(allA?`[a${i}]`:'')});
+   fc+=`${cat}concat=n=${names.length}:v=1:a=${allA?1:0}[v]`+(allA?'[a]':'');
+   args.push('-filter_complex',fc,'-map','[v]');if(allA)args.push('-map','[a]');
+   if(e0==='webm')args.push('-c:v','libvpx','-b:v','2M','-deadline','realtime','-cpu-used','8',...(allA?['-c:a','libvorbis']:[]));
+   else args.push('-c:v','libx264','-preset','ultrafast','-crf','23',...(allA?['-c:a','aac','-b:a','128k']:[]));
+   if(['mp4','m4v','mov'].includes(e0))args.push('-movflags','+faststart');
+   args.push(out);const r=await f.exec(args);if(r!==0)throw new Error('重新編碼失敗（ffmpeg 結束代碼 '+r+'）')}
+  const data=await f.readFile(out);const blob=new Blob([data.buffer],{type:mime[e0]||'video/'+e0});lastUrl=URL.createObjectURL(blob);
+  $('prog').value=1;status('✅ 合併完成'+(reenc?'（已重新編碼）':'（快速模式）')+'，大小 '+fmt(blob.size));
+  $('result').innerHTML=`<video controls src="${lastUrl}"></video><a id="dl" href="${lastUrl}" download="merged.${e0}">⬇ 下載合併影片</a>`;
+ }catch(e){console.error(e);status('❌ 發生錯誤：'+(e&&e.message||e)+'（可能是檔案過大導致記憶體不足，或格式不支援）',true)}
+ finally{if(f)for(const n of [...names,'list.txt',out]){try{await f.deleteFile(n)}catch(e){}}$('merge').disabled=files.length<2}
+};
+</script></body></html>
