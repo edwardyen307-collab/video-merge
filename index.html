@@ -14,6 +14,7 @@ button{padding:6px 10px;border:0;border-radius:6px;background:#e3e6ea;cursor:poi
 progress{width:100%;height:18px}#log{font-family:monospace;font-size:.75em;max-height:160px;overflow:auto;background:#111;color:#9f9;padding:8px;white-space:pre-wrap;display:none}
 .err{color:#c00;font-weight:bold}video{width:100%;margin-top:8px}
 #save{display:inline-block;margin:8px 8px 0 0;padding:12px 22px;background:#2563eb;color:#fff;font-size:1.1em;border-radius:6px}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:10px}#grid figure{margin:0;background:#fafafa;border:1px solid #ddd;border-radius:6px;padding:6px;font-size:.8em;word-break:break-all}#grid img{width:100%;border-radius:4px}#grid button,#grid a{font-size:.85em;margin:4px 4px 0 0;padding:6px 8px}
 .tip{font-size:.9em;color:#444;margin-top:6px}
 @media(max-width:600px){body{margin:12px auto}li{flex-wrap:wrap}li .n{flex-basis:60%}button{padding:10px 14px}#merge,#save,#dl{width:100%;text-align:center;box-sizing:border-box}}
 #dl{display:inline-block;margin-top:8px;padding:10px 20px;background:#16a34a;color:#fff;border-radius:6px;text-decoration:none}
@@ -27,11 +28,13 @@ progress{width:100%;height:18px}#log{font-family:monospace;font-size:.75em;max-h
  <small>可拖曳項目或使用 ▲▼ 調整合併順序。所有影片需為相同格式（副檔名）。</small>
 </div>
 <div class="card">
- <button id="merge" disabled>合併</button>
+ <button id="merge" disabled>合併</button> <button id="extract" disabled style="background:#7c3aed;color:#fff;font-size:1.1em;padding:10px 24px">擷取首尾幀</button>
+ <div class="tip">上傳一次後，可選擇「合併」（需 2 個以上影片）或「擷取首尾幀」（每支影片擷取第一幀與最後一幀為 JPG）。</div>
  <div id="status" style="margin-top:10px"></div>
  <progress id="prog" value="0" max="1" style="display:none"></progress>
  <div id="log"></div>
  <div id="result"></div>
+ <div id="frames"></div>
 </div>
 <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
 <script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
@@ -55,7 +58,7 @@ function render(){const ul=$('list');ul.innerHTML='';
   li.ondrop=e=>{e.preventDefault();e.stopPropagation();if(dragIdx===null)return;const [m]=files.splice(dragIdx,1);files.splice(i,0,m);dragIdx=null;render()};
   ul.append(li)});
  const total=files.reduce((a,f)=>a+f.size,0);
- $('merge').disabled=files.length<2;
+ $('merge').disabled=files.length<2;$('extract').disabled=files.length<1;
  if(total>(isIOS?5e8:1.5e9))status('⚠️ 總大小 '+fmt(total)+'，可能超出瀏覽器記憶體上限而失敗。',true);
 }
 function add(list){for(const f of list){if(!f.type.startsWith('video/')&&!/\.(mp4|mov|mkv|webm|avi|m4v|ts|flv)$/i.test(f.name))continue;files.push(f)}render()}
@@ -114,5 +117,39 @@ $('merge').onclick=async()=>{
   if(canShare)$('save').onclick=()=>{navigator.share({files:[file]}).catch(e=>{if(e.name!=='AbortError')status('❌ 分享失敗：'+e.message+'，請改用下載。',true)})};
  }catch(e){console.error(e);status('❌ 發生錯誤：'+(e&&e.message||e)+'（可能是檔案過大導致記憶體不足，或格式不支援）',true)}
  finally{if(f)for(const n of [...names,'list.txt',out]){try{await f.deleteFile(n)}catch(e){}}$('merge').disabled=files.length<2}
+};
+let frameImgs=[];
+// PNG（無損）→ 瀏覽器 canvas 轉高品質 JPEG（品質 0.95）
+async function toJpeg(png){const bmp=await createImageBitmap(new Blob([png.buffer.slice(0)],{type:'image/png'}));const c=document.createElement('canvas');c.width=bmp.width;c.height=bmp.height;c.getContext('2d').drawImage(bmp,0,0);bmp.close&&bmp.close();return await new Promise((ok,no)=>c.toBlob(b=>b?ok(b):no(new Error('JPEG 轉換失敗')),'image/jpeg',0.95))}
+function canShareFiles(fl){try{return !!(navigator.canShare&&navigator.canShare({files:fl}))}catch(e){return false}}
+function shareFiles(fl){navigator.share({files:fl}).catch(e=>{if(e.name!=='AbortError')status('❌ 分享失敗：'+e.message+'，請改用下載。',true)})}
+function dl(url,name){const a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove()}
+$('extract').onclick=async()=>{
+ $('merge').disabled=$('extract').disabled=true;$('frames').innerHTML='';$('log').textContent='';$('prog').style.display='block';$('prog').value=0;
+ frameImgs.forEach(x=>URL.revokeObjectURL(x.url));frameImgs=[];let f,tmp=[];
+ try{f=await load();
+  for(let i=0;i<files.length;i++){const src=files[i],n='x'+i+'.'+ext(src),base=src.name.replace(/\.[^.]+$/,'');tmp.push(n,'first.png','last.png');
+   status(`擷取中（${i+1}/${files.length}）：${src.name}`);await f.writeFile(n,await fetchFile(src));
+   let r=await f.exec(['-i',n,'-map','0:v:0','-frames:v','1','-c:v','png','first.png']);if(r!==0)throw new Error(src.name+' 第一幀擷取失敗');
+   // 最後一幀：從結尾前 3 秒開始解碼，reverse 後取第一張 = 最後一個可解碼的幀
+   r=await f.exec(['-sseof','-3','-i',n,'-map','0:v:0','-vf','reverse','-frames:v','1','-c:v','png','last.png']);
+   let last;try{last=await f.readFile('last.png')}catch(e){}
+   if(r!==0||!last||!last.length){r=await f.exec(['-i',n,'-map','0:v:0','-update','1','-c:v','png','last.png']);last=await f.readFile('last.png')}
+   const first=await f.readFile('first.png');
+   for(const [d,k,lab] of [[first,'first','第一幀'],[last,'last','最後一幀']]){const file=new File([await toJpeg(d)],`${base}_${k}.jpg`,{type:'image/jpeg'});frameImgs.push({file,url:URL.createObjectURL(file),label:src.name+'｜'+lab})}
+   for(const t of [n,'first.png','last.png'])try{await f.deleteFile(t)}catch(e){}
+   $('prog').value=(i+1)/files.length}
+  const all=frameImgs.map(x=>x.file),cs=canShareFiles(all);
+  status(`✅ 已擷取 ${all.length} 張影像`);
+  $('frames').innerHTML=(cs?'<button id="saveAll" style="background:#2563eb;color:#fff;padding:12px 22px;font-size:1.05em">📥 全部儲存到相簿</button> ':'')+'<button id="dlAll">⬇ 全部下載</button>'+
+   (cs?'<div class="tip">點「全部儲存到相簿」後，在分享選單中選擇「儲存 '+all.length+' 張影像」即可存入「照片」App。</div>':'')+
+   (isIOS&&!cs?'<div class="tip">此瀏覽器不支援分享檔案，請長按圖片選「加入照片」，或下載後從「檔案」App 儲存。</div>':'')+'<div id="grid"></div>';
+  frameImgs.forEach((x,i)=>{const fg=document.createElement('figure');fg.innerHTML=`<img src="${x.url}" alt=""><div></div>`;fg.querySelector('div').textContent=x.label+' → '+x.file.name;
+   if(canShareFiles([x.file])){const b=document.createElement('button');b.textContent='📥 儲存';b.className='save1';b.onclick=()=>shareFiles([x.file]);fg.append(b)}
+   const a=document.createElement('a');a.href=x.url;a.download=x.file.name;a.textContent='⬇ 下載';fg.append(a);$('grid').append(fg)});
+  if(cs)$('saveAll').onclick=()=>shareFiles(all);
+  $('dlAll').onclick=async()=>{for(const x of frameImgs){dl(x.url,x.file.name);await new Promise(r=>setTimeout(r,400))}};
+ }catch(e){console.error(e);status('❌ 擷取失敗：'+(e&&e.message||e),true);if(f)for(const t of tmp)try{await f.deleteFile(t)}catch(_){}}
+ finally{$('merge').disabled=files.length<2;$('extract').disabled=files.length<1}
 };
 </script></body></html>
