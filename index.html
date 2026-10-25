@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>影片合併工具</title>
+<title>影片合併工具 v2026-10-25a</title>
 <style>
 body{font-family:system-ui,"Noto Sans TC",sans-serif;max-width:760px;margin:24px auto;padding:0 16px;background:#f6f7f9;color:#222}
 h1{font-size:1.5em}.card{background:#fff;border-radius:10px;padding:16px;margin:12px 0;box-shadow:0 1px 3px #0002}
@@ -19,7 +19,7 @@ progress{width:100%;height:18px}#log{font-family:monospace;font-size:.75em;max-h
 @media(max-width:600px){body{margin:12px auto}li{flex-wrap:wrap}li .n{flex-basis:60%}button{padding:10px 14px}#merge,#save,#dl{width:100%;text-align:center;box-sizing:border-box}}
 #dl{display:inline-block;margin-top:8px;padding:10px 20px;background:#16a34a;color:#fff;border-radius:6px;text-decoration:none}
 </style></head><body>
-<h1>🎬 影片合併工具 <small style="font-size:.45em;color:#888">v2026-10-23e</small></h1>
+<h1>🎬 影片合併工具 <small style="font-size:.45em;color:#888">v2026-10-25a</small></h1>
 <p>全部在瀏覽器內處理（ffmpeg.wasm），影片不會上傳到任何伺服器。</p>
 <div class="warn">⚠️ 注意：瀏覽器記憶體有限（約 2GB），所有影片總大小建議在數百 MB 以內；若需重新編碼，速度會相當慢（單執行緒）。首次使用需下載約 32MB 的 ffmpeg 核心。<br>📱 iPhone/iPad 記憶體更有限，建議總大小保持在 500MB 以下。</div>
 <div class="card">
@@ -78,6 +78,8 @@ async function load(){if(ffmpeg)return ffmpeg;status('正在載入 ffmpeg 核心
   coreURL:await toBlobURL(base+'/ffmpeg-core.js','text/javascript'),wasmURL:await toBlobURL(base+'/ffmpeg-core.wasm','application/wasm')});
  return ffmpeg=f}
 let logBuf=[];
+async function vdur(f,name,x){logBuf=[];await f.exec(['-hide_banner','-loglevel','error','-i',name,'-map','0:v:0','-c','copy','-f','framecrc','-']);let tb=0,mx=0,mn=Infinity;for(const l of logBuf){let m=/^#tb 0: (\d+)\/(\d+)/.exec(l);if(m){tb=m[1]/m[2];continue}m=/^\s*0,\s*(-?\d+),\s*(-?\d+),\s*(\d+),/.exec(l);if(m&&tb){const p=+m[2]*tb,d=+m[3]*tb;mn=Math.min(mn,p);mx=Math.max(mx,p+d)}}const v=mx-(isFinite(mn)?mn:0);return v>0.05?v:(x.dur||1)}
+const FAST=false; // 快速 copy 模式易因各段影音長度/時間戳不一致在 iPhone 停格，固定全部重新編碼
 async function probe(f,name){logBuf=[];await f.exec(['-hide_banner','-i',name]);const lines=logBuf.filter(l=>!/attached pic|Video: (mjpeg|png|bmp)/i.test(l)),t=lines.join('\n');
  const vl=lines.find(l=>/Stream #.*Video: /.test(l))||'',al=lines.find(l=>/Stream #.*Audio: /.test(l))||'';
  const prof=vl.match(/Video: \w+ \(([^)]+)\)/),v=vl.match(/Video: (\w+)/),wh=vl.match(/, (\d{2,5})x(\d{2,5})/),pf=vl.match(/Video: \w+[^,]*, (\w+)/),fps=vl.match(/([\d.]+) fps/),tbn=vl.match(/([\d.]+)k? tbn/);
@@ -102,12 +104,13 @@ $('merge').onclick=async()=>{
   f=await load();status('正在讀取影片…');
   for(let i=0;i<files.length;i++){await f.writeFile(names[i],await fetchFile(files[i]));$('prog').value=(i+1)/files.length}
   const info=[];for(let i=0;i<names.length;i++){const x=await probe(f,names[i]);x.ext=exts[i]==='m4v'?'mp4':exts[i];info.push(x)}log('探測結果: '+JSON.stringify(info));
+  for(let i=0;i<names.length;i++){info[i].vdur=await vdur(f,names[i],info[i]);}
   const M=majority(info);e0=M.ext;out='output.'+e0;
   const bad=info.map((x,i)=>specKey(x)!==specKey(M)?i:-1).filter(i=>i>=0);
   const canNorm=M.v&&VENC[M.v]&&(!M.a||AENC[M.a])&&M.rot===0&&M.dw>0&&M.pix&&M.fps;
   log(`多數規格: ${M.v} ${M.dw}×${M.dh} ${M.pix} ${M.fps}fps 音訊=${M.a||'無'} ${M.sr||''} ${M.ch||''} 容器=${e0}；需轉換: ${bad.map(i=>i+1).join(',')||'無'}`);
   let ok=false,reenc=false,conv=0;const cat=names.slice();
-  if(bad.length===0){
+  if(FAST&&bad.length===0){
    try{
     for(const i of bad){const x=info[i];conv++;
      status(`第 ${i+1} 支影片規格不同，正在轉換為 ${M.dw}×${M.dh}（${M.v}${M.a?'/'+M.a:''}, ${M.fps}fps）…（${conv}/${bad.length}）`);$('prog').value=0;
@@ -134,15 +137,15 @@ $('merge').onclick=async()=>{
    if(e0!=='webm'){e0='mp4';out='output.mp4'}
    status(bad.length?`偵測到 ${bad.length} 支影片規格不同，正在將全部影片統一轉換為 ${M.dw||1280}×${M.dh||720} 並合併（確保 iPhone 播放順暢），請耐心等候…`:'⚠️ 改為全部重新編碼合併（H.264/AAC），速度較慢，請耐心等候…');$('prog').value=0;
    const W=(M.dw||1280)&~1,H=(M.dh||720)&~1,fps=M.fps&&+M.fps<=60?M.fps:30,anyA=info.some(x=>x.a),SR=M.sr===48000?48000:44100;
-   const args=[];names.forEach(n=>args.push('-i',n));let fc='',cc='';
-   info.forEach((x,i)=>{fc+=`[${i}:v:0]setpts=PTS-STARTPTS,scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},format=yuv420p[v${i}];`;
-    if(anyA)fc+=(x.a?`[${i}:a:0]asetpts=PTS-STARTPTS,aresample=${SR}:async=1:first_pts=0,aformat=sample_rates=${SR}:channel_layouts=stereo,apad,atrim=duration=${x.dur||1}`:`anullsrc=r=${SR}:cl=stereo,atrim=duration=${x.dur||1}`)+`[a${i}];`;cc+=`[v${i}]`+(anyA?`[a${i}]`:'')});
+   const args=[];names.forEach(n=>args.push('-i',n));let fc='',cc='';const D=x=>(x.vdur||x.dur||1).toFixed(3);
+   info.forEach((x,i)=>{fc+=`[${i}:v:0]setpts=PTS-STARTPTS,scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},trim=duration=${D(x)},setpts=PTS-STARTPTS,format=yuv420p[v${i}];`;
+    if(anyA)fc+=(x.a?`[${i}:a:0]asetpts=PTS-STARTPTS,aresample=${SR}:async=1:first_pts=0,aformat=sample_rates=${SR}:channel_layouts=stereo,apad,atrim=duration=${D(x)},asetpts=PTS-STARTPTS`:`anullsrc=r=${SR}:cl=stereo,atrim=duration=${D(x)}`)+`[a${i}];`;cc+=`[v${i}]`+(anyA?`[a${i}]`:'')});
    fc+=`${cc}concat=n=${names.length}:v=1:a=${anyA?1:0}[v]`+(anyA?'[a]':'');
    args.push('-filter_complex',fc,'-map','[v]');if(anyA)args.push('-map','[a]');
    if(e0==='webm')args.push('-c:v','libvpx','-b:v','2M','-deadline','realtime','-cpu-used','8',...(anyA?['-c:a','libvorbis']:[]));
    else args.push('-c:v','libx264','-preset','veryfast','-crf','21','-profile:v','high','-level:v','4.1','-pix_fmt','yuv420p','-r',String(fps),'-fps_mode','cfr','-g',String(Math.round(fps*2)),'-video_track_timescale','90000',...(anyA?['-c:a','aac','-b:a','160k','-ar',String(SR),'-ac','2']:[]));
    if(['mp4','m4v','mov'].includes(e0))args.push('-movflags','+faststart');
-   args.push('-map_metadata','-1',out);const r=await f.exec(args);if(r!==0)throw new Error('重新編碼失敗（ffmpeg 結束代碼 '+r+'）')}
+   if(anyA&&e0!=='webm')args.push('-shortest');args.push('-map_metadata','-1',out);const r=await f.exec(args);if(r!==0)throw new Error('重新編碼失敗（ffmpeg 結束代碼 '+r+'）')}
   window.__mergeInfo={major:M,converted:bad.map(i=>i+1),reenc,totalDur:info.reduce((s,x)=>s+x.dur,0)};
   const data=await f.readFile(out);const blob=new Blob([data.buffer],{type:mime[e0]||'video/'+e0});lastUrl=URL.createObjectURL(blob);
   $('prog').value=1;status('✅ 合併完成'+(reenc?'（已全部重新編碼）':conv?`（已自動轉換 ${conv} 支影片，快速模式）`:'（快速模式）')+'，大小 '+fmt(blob.size));
