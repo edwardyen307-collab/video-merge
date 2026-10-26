@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>影片合併工具 v2026-10-27a</title>
+<title>影片合併工具 v2026-10-27b</title>
 <style>
 body{font-family:system-ui,"Noto Sans TC",sans-serif;max-width:760px;margin:24px auto;padding:0 16px;background:#f6f7f9;color:#222}
 h1{font-size:1.5em}.card{background:#fff;border-radius:10px;padding:16px;margin:12px 0;box-shadow:0 1px 3px #0002}
@@ -19,7 +19,7 @@ progress{width:100%;height:18px}#log{font-family:monospace;font-size:.75em;max-h
 @media(max-width:600px){body{margin:12px auto}li{flex-wrap:wrap}li .n{flex-basis:60%}button{padding:10px 14px}#merge,#save,#dl{width:100%;text-align:center;box-sizing:border-box}}
 #dl{display:inline-block;margin-top:8px;padding:10px 20px;background:#16a34a;color:#fff;border-radius:6px;text-decoration:none}
 </style></head><body>
-<h1>🎬 影片合併工具 <small style="font-size:.45em;color:#888">v2026-10-27a</small></h1>
+<h1>🎬 影片合併工具 <small style="font-size:.45em;color:#888">v2026-10-27b</small></h1>
 <p>全部在瀏覽器內處理（ffmpeg.wasm），影片不會上傳到任何伺服器。</p>
 <div class="warn">⚠️ 注意：瀏覽器記憶體有限（約 2GB），所有影片總大小建議在數百 MB 以內；若需重新編碼，速度會相當慢（單執行緒）。首次使用需下載約 32MB 的 ffmpeg 核心。<br>📱 iPhone/iPad 記憶體更有限，建議總大小保持在 500MB 以下。</div>
 <div class="card">
@@ -79,9 +79,11 @@ async function load(){if(ffmpeg)return ffmpeg;status('正在載入 ffmpeg 核心
  return ffmpeg=f}
 let logBuf=[];
 async function vdur(f,name,x){logBuf=[];await f.exec(['-hide_banner','-loglevel','error','-i',name,'-map','0:'+(x.vi??'v:0'),'-c','copy','-f','framecrc','-']);let pk=0;let tb=0,mx=0,mn=Infinity;for(const l of logBuf){let m=/^#tb 0: (\d+)\/(\d+)/.exec(l);if(m){tb=m[1]/m[2];continue}m=/^\s*0,\s*(-?\d+),\s*(-?\d+),\s*(\d+),/.exec(l);if(m&&tb){const p=+m[2]*tb,d=+m[3]*tb;mn=Math.min(mn,p);mx=Math.max(mx,p+d);pk++}}x.pk=pk;const v=mx-(isFinite(mn)?mn:0);return v>0.05?v:(x.dur||1)}
-async function vcheck(f,name,x,i,fn){logBuf=[];await f.exec(['-hide_banner','-loglevel','error','-i',name,'-map','0:'+(x.vi??'v:0'),'-an','-vf','scale=8:8','-f','framecrc','-']);let n=0;for(const l of logBuf)if(/^\s*0,\s*-?\d+,/.test(l))n++;x.dec=n;
- log(`第 ${i+1} 支（${fn}）畫面：封包 ${x.pk||'?'}、成功解碼 ${n} 格、長度 ${x.vdur?.toFixed(2)} 秒`);
- if(x.v==null||n<2||(x.pk&&n<x.pk*0.8))throw new Error(`第 ${i+1} 支影片「${fn}」的畫面無法在瀏覽器中解碼（編碼 ${x.v||'未知'}${x.pix?' / '+x.pix:''}，只解出 ${n}/${x.pk||'?'} 格）。為避免合併出停格的影片已中止。請先把這支影片轉成 H.264（例如 iPhone 設定→相機→格式選「最相容」重新存，或用剪輯 App 匯出）再合併。`)}
+async function vcheck(f,name,x,i,fn){logBuf=[];await f.exec(['-hide_banner','-loglevel','error','-i',name,'-map','0:'+(x.vi??'v:0'),'-an','-sn','-dn','-fps_mode','passthrough','-vf','scale=8:8','-f','framecrc','-']);
+ let n=0,tb=0,mn=Infinity,mx=0,ps=[];for(const l of logBuf){let m=/^#tb 0: (\d+)\/(\d+)/.exec(l);if(m){tb=m[1]/m[2];continue}m=/^\s*0,\s*-?\d+,\s*(-?\d+),\s*(\d+),/.exec(l);if(m&&tb){n++;const p=+m[1]*tb;ps.push(p);mn=Math.min(mn,p);mx=Math.max(mx,p+(+m[2])*tb)}}
+ ps.sort((a,b)=>a-b);let gap=0;for(let k=1;k<ps.length;k++)gap=Math.max(gap,ps[k]-ps[k-1]);const d=n?mx-mn:0;x.dec=n;if(d>0.05)x.vdur=d;
+ log(`第 ${i+1} 支（${fn}）畫面：解碼 ${n} 格、長度 ${d.toFixed(2)} 秒、最大間隔 ${gap.toFixed(2)} 秒（檔案標示 ${(+x.dur||0).toFixed(2)} 秒）`);
+ if(x.v==null||n<2||(x.dur>1&&d<x.dur*0.6)||gap>2)throw new Error(`第 ${i+1} 支影片「${fn}」的畫面無法在瀏覽器中完整解碼（編碼 ${x.v||'未知'}${x.pix?' / '+x.pix:''}，只解出 ${n} 格、${d.toFixed(1)}/${(+x.dur||0).toFixed(1)} 秒）。為避免合併出停格的影片已中止。請先把這支影片轉成 H.264（例如在「照片」App 分享→選項→「最相容」，或用剪輯 App 匯出）再合併。`)}
 const FAST=false; // 快速 copy 模式易因各段影音長度/時間戳不一致在 iPhone 停格，固定全部重新編碼
 async function probe(f,name){logBuf=[];await f.exec(['-hide_banner','-i',name]);const lines=logBuf.filter(l=>!/attached pic|Video: (mjpeg|png|bmp)/i.test(l)),t=lines.join('\n');
  const vl=lines.find(l=>/Stream #.*Video: /.test(l))||'',al=lines.find(l=>/Stream #.*Audio: /.test(l))||'';
@@ -90,7 +92,8 @@ async function probe(f,name){logBuf=[];await f.exec(['-hide_banner','-i',name]);
  const a=al.match(/Audio: (\w+)/),sr=al.match(/(\d+) Hz/),ch=al.match(/Hz, ([^,]+),/),fm=t.match(/Input #0, ([^,]+),/),du=t.match(/Duration: (\d+):(\d+):([\d.]+)/);
  const w=wh?+wh[1]:0,h=wh?+wh[2]:0,sw=r===90||r===270;
  const vis=lines.filter(l=>/Stream #.*Video: /.test(l)).map(l=>+(l.match(/Stream #\d+:(\d+)/)||[0,0])[1]);const vi=vl.match(/Stream #\d+:(\d+)/),ai=al.match(/Stream #\d+:(\d+)/);
- return {vis,vi:vi?+vi[1]:null,ai:ai?+ai[1]:null,prof:prof?prof[1]:null,v:v?v[1]:null,w,h,dw:sw?h:w,dh:sw?w:h,rot:r,pix:pf?pf[1]:null,fps:fps?fps[1]:null,tbn:tbn?tbn[1]:null,a:a?a[1]:null,sr:sr?+sr[1]:null,ch:ch?ch[1].trim():null,fmt:fm?fm[1]:null,
+ const hdr=/bt2020|arib-std-b67|smpte2084|10le|p10/.test(vl);
+ return {hdr,vis,vi:vi?+vi[1]:null,ai:ai?+ai[1]:null,prof:prof?prof[1]:null,v:v?v[1]:null,w,h,dw:sw?h:w,dh:sw?w:h,rot:r,pix:pf?pf[1]:null,fps:fps?fps[1]:null,tbn:tbn?tbn[1]:null,a:a?a[1]:null,sr:sr?+sr[1]:null,ch:ch?ch[1].trim():null,fmt:fm?fm[1]:null,
   dur:du?(+du[1])*3600+(+du[2])*60+parseFloat(du[3]):0}}
 // 規格比對鍵：顯示尺寸、旋轉、編碼、像素格式、幀率、音訊、容器
 const specKey=x=>[x.ext,x.v,x.prof,x.w,x.h,x.tbn,x.dw,x.dh,x.rot,x.pix,x.fps,x.a||'-',x.a?x.sr:'',x.a?x.ch:''].join('|');
@@ -143,12 +146,12 @@ $('merge').onclick=async()=>{
    status(bad.length?`偵測到 ${bad.length} 支影片規格不同，正在將全部影片統一轉換為 ${M.dw||1280}×${M.dh||720} 並合併（確保 iPhone 播放順暢），請耐心等候…`:'⚠️ 改為全部重新編碼合併（H.264/AAC），速度較慢，請耐心等候…');$('prog').value=0;
    const W=(M.dw||1280)&~1,H=(M.dh||720)&~1,fps=M.fps&&+M.fps<=60?M.fps:30,anyA=info.some(x=>x.a),SR=M.sr===48000?48000:44100;
    const args=[];names.forEach(n=>args.push('-i',n));let fc='',cc='';const D=x=>(x.vdur||x.dur||1).toFixed(3);
-   info.forEach((x,i)=>{fc+=`[${i}:${x.vi??'v:0'}]setpts=PTS-STARTPTS,scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},trim=duration=${D(x)},setpts=PTS-STARTPTS,format=yuv420p[v${i}];`;
+   info.forEach((x,i)=>{fc+=`[${i}:${x.vi??'v:0'}]setpts=PTS-STARTPTS,scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1${x.hdr?',colorspace=all=bt709:iall=bt2020:itrc=bt709:format=yuv420p:fast=1':''},fps=${fps},trim=duration=${D(x)},setpts=PTS-STARTPTS,format=yuv420p[v${i}];`;
     if(anyA)fc+=(x.a?`[${i}:${x.ai??'a:0'}]asetpts=PTS-STARTPTS,aresample=${SR}:async=1:first_pts=0,aformat=sample_rates=${SR}:channel_layouts=stereo,apad,atrim=duration=${D(x)},asetpts=PTS-STARTPTS`:`anullsrc=r=${SR}:cl=stereo,atrim=duration=${D(x)}`)+`[a${i}];`;cc+=`[v${i}]`+(anyA?`[a${i}]`:'')});
    fc+=`${cc}concat=n=${names.length}:v=1:a=${anyA?1:0}[v]`+(anyA?'[a]':'');
    args.push('-filter_complex',fc,'-map','[v]');if(anyA)args.push('-map','[a]');
    if(e0==='webm')args.push('-c:v','libvpx','-b:v','2M','-deadline','realtime','-cpu-used','8',...(anyA?['-c:a','libvorbis']:[]));
-   else args.push('-c:v','libx264','-preset','veryfast','-crf','21','-profile:v','high','-level:v','4.1','-pix_fmt','yuv420p','-r',String(fps),'-fps_mode','cfr','-g',String(Math.round(fps*2)),'-video_track_timescale','90000',...(anyA?['-c:a','aac','-b:a','160k','-ar',String(SR),'-ac','2']:[]));
+   else args.push('-c:v','libx264','-preset','veryfast','-crf','21','-profile:v','high','-level:v','4.1','-pix_fmt','yuv420p','-r',String(fps),'-fps_mode','cfr','-g',String(Math.round(fps*2)),'-video_track_timescale','90000','-color_primaries','bt709','-color_trc','bt709','-colorspace','bt709','-sn','-dn',...(anyA?['-c:a','aac','-b:a','160k','-ar',String(SR),'-ac','2']:[]));
    if(['mp4','m4v','mov'].includes(e0))args.push('-movflags','+faststart');
    if(anyA&&e0!=='webm')args.push('-shortest');args.push('-map_metadata','-1',out);const r=await f.exec(args);if(r!==0)throw new Error('重新編碼失敗（ffmpeg 結束代碼 '+r+'）')}
   window.__mergeInfo={major:M,converted:bad.map(i=>i+1),reenc,totalDur:info.reduce((s,x)=>s+x.dur,0)};
