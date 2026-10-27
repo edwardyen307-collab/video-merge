@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>影片合併工具 v2026-10-27c</title>
+<title>影片合併工具 v2026-10-27d</title>
 <style>
 body{font-family:system-ui,"Noto Sans TC",sans-serif;max-width:760px;margin:24px auto;padding:0 16px;background:#f6f7f9;color:#222}
 h1{font-size:1.5em}.card{background:#fff;border-radius:10px;padding:16px;margin:12px 0;box-shadow:0 1px 3px #0002}
@@ -19,7 +19,7 @@ progress{width:100%;height:18px}#log{font-family:monospace;font-size:.75em;max-h
 @media(max-width:600px){body{margin:12px auto}li{flex-wrap:wrap}li .n{flex-basis:60%}button{padding:10px 14px}#merge,#save,#dl{width:100%;text-align:center;box-sizing:border-box}}
 #dl{display:inline-block;margin-top:8px;padding:10px 20px;background:#16a34a;color:#fff;border-radius:6px;text-decoration:none}
 </style></head><body>
-<h1>🎬 影片合併工具 <small style="font-size:.45em;color:#888">v2026-10-27c</small></h1>
+<h1>🎬 影片合併工具 <small style="font-size:.45em;color:#888">v2026-10-27d</small></h1>
 <p>全部在瀏覽器內處理（ffmpeg.wasm），影片不會上傳到任何伺服器。</p>
 <div class="warn">⚠️ 注意：瀏覽器記憶體有限（約 2GB），所有影片總大小建議在數百 MB 以內；若需重新編碼，速度會相當慢（單執行緒）。首次使用需下載約 32MB 的 ffmpeg 核心。<br>📱 iPhone/iPad 記憶體更有限，建議總大小保持在 500MB 以下。</div>
 <div class="card">
@@ -46,7 +46,7 @@ let files=[],ffmpeg=null,dragIdx=null,lastUrl=null;
 const ext=f=>(f.name.split('.').pop()||'').toLowerCase();
 const fmt=b=>b>1e9?(b/1e9).toFixed(2)+' GB':b>=1e6?(b/1e6).toFixed(1)+' MB':Math.max(1,Math.round(b/1e3))+' KB';
 function status(t,err){$('status').innerHTML=err?'<span class="err">'+t+'</span>':t}
-function log(t){const l=$('log');l.style.display='block';l.textContent+=t+'\n';l.scrollTop=l.scrollHeight}
+let LQ=[],LT=0;function log(t){LQ.push(t);if(!LT)LT=setTimeout(()=>{LT=0;const l=$('log');l.style.display='block';let s=l.textContent+LQ.join('\n')+'\n';LQ=[];if(s.length>20000)s=s.slice(-20000);l.textContent=s;l.scrollTop=l.scrollHeight},200)}
 function render(){const ul=$('list');ul.innerHTML='';
  files.forEach((f,i)=>{const li=document.createElement('li');li.draggable=true;
   li.innerHTML=`<b>${i+1}.</b><span class="n"></span><small>${fmt(f.size)}</small>`;
@@ -67,7 +67,7 @@ $('drop').onclick=()=>$('file').click();$('file').onchange=e=>{add(e.target.file
 $('drop').ondragover=e=>{e.preventDefault();$('drop').classList.add('over')};$('drop').ondragleave=()=>$('drop').classList.remove('over');
 $('drop').ondrop=e=>{e.preventDefault();$('drop').classList.remove('over');if(e.dataTransfer.files.length)add(e.dataTransfer.files)};
 async function load(){if(ffmpeg)return ffmpeg;status('正在載入 ffmpeg 核心（約 32MB，首次較久）…');
- const f=new FFmpeg();f.on('log',({message})=>{logBuf.push(message);log(message)});
+ const f=new FFmpeg();f.on('log',({message})=>{logBuf.push(message);if(!/^\s*0,\s*-?\d+,|^#/.test(message))log(message)});
  f.on('progress',({progress})=>{if(progress>=0&&progress<=1)$('prog').value=progress});
  const base='https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
  await f.load({classWorkerURL:await toBlobURL('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/814.ffmpeg.js','text/javascript'),
@@ -142,11 +142,42 @@ $('merge').onclick=async()=>{
    if(e0!=='webm'){e0='mp4';out='output.mp4'}
    status(bad.length?`偵測到 ${bad.length} 支影片規格不同，正在將全部影片統一轉換為 ${M.dw||1280}×${M.dh||720} 並合併（確保 iPhone 播放順暢），請耐心等候…`:'⚠️ 改為全部重新編碼合併（H.264/AAC），速度較慢，請耐心等候…');$('prog').value=0;
    const W=(M.dw||1280)&~1,H=(M.dh||720)&~1,fps=M.fps&&+M.fps<=60?M.fps:30,anyA=info.some(x=>x.a),SR=M.sr===48000?48000:44100;
-   const args=[];names.forEach(n=>args.push('-i',n));let fc='',cc='';const D=x=>(x.vdur||x.dur||1).toFixed(3);
-   {const lim=isIOS?4e8:1.2e9;info.forEach((x,i)=>{if(!x.rev)return;const need=W*H*1.5*fps*(x.vdur||x.dur||1);log(`第 ${i+1} 支倒轉：約需 ${fmt(need)} 記憶體（${W}×${H}、${fps}fps、${(x.vdur||x.dur||1).toFixed(1)} 秒）`);
-    if(need>lim)throw new Error(`第 ${i+1} 支影片「${files[i].name}」要倒轉約需 ${fmt(need)} 記憶體，超過瀏覽器可用上限（約 ${fmt(lim)}）。請先把這支影片剪短（建議 ${Math.max(1,Math.floor(lim/(W*H*1.5*fps)))} 秒以內）或降低解析度後再倒轉。`)})}
-   info.forEach((x,i)=>{fc+=`[${i}:${x.vi??'v:0'}]setpts=PTS-STARTPTS,scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1${x.hdr?',colorspace=all=bt709:iall=bt2020:itrc=bt709:format=yuv420p:fast=1':''},fps=${fps},trim=duration=${D(x)},setpts=PTS-STARTPTS,format=yuv420p${x.rev?',reverse,setpts=PTS-STARTPTS':''}[v${i}];`;
-    if(anyA)fc+=(x.a?`[${i}:${x.ai??'a:0'}]asetpts=PTS-STARTPTS,aresample=${SR}:async=1:first_pts=0,aformat=sample_rates=${SR}:channel_layouts=stereo,apad,atrim=duration=${D(x)},asetpts=PTS-STARTPTS${x.rev?',areverse,asetpts=PTS-STARTPTS':''}`:`anullsrc=r=${SR}:cl=stereo,atrim=duration=${D(x)}`)+`[a${i}];`;cc+=`[v${i}]`+(anyA?`[a${i}]`:'')});
+   let fc='',cc='';const D=x=>(x.vdur||x.dur||1).toFixed(3);
+   const VF=(x,i)=>`[${i}:${x.vi??'v:0'}]setpts=PTS-STARTPTS,scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1${x.hdr?',colorspace=all=bt709:iall=bt2020:itrc=bt709:format=yuv420p:fast=1':''},fps=${fps},trim=duration=${D(x)},setpts=PTS-STARTPTS,format=yuv420p`;
+   const AF=(x,i)=>x.a?`[${i}:${x.ai??'a:0'}]asetpts=PTS-STARTPTS,aresample=${SR}:async=1:first_pts=0,aformat=sample_rates=${SR}:channel_layouts=stereo,apad,atrim=duration=${D(x)},asetpts=PTS-STARTPTS`:`anullsrc=r=${SR}:cl=stereo,atrim=duration=${D(x)}`;
+   // 分段倒轉：標準化 → 依影格切成約 1.5 秒小段 → 每段 reverse/areverse → 反向串接；小段用完即刪，記憶體只需一小段
+   const inN=names.slice(),RV=info.map(()=>null);
+   // ffmpeg.wasm 連續執行太多次會累積記憶體而讓分頁當掉：定期重啟核心，只把仍需要的檔案搬回去
+   const fresh=async keep=>{const st=[];for(const n of keep){try{st.push([n,await f.readFile(n)])}catch(e){}}try{f.terminate()}catch(e){}ffmpeg=null;f=await load();for(const [n,d] of st)await f.writeFile(n,d)};
+   for(let i=0;i<info.length;i++){const x=info[i];if(!x.rev)continue;const fr=+fps,K=Math.max(1,Math.round(fr*1.5));
+    status(`第 ${i+1} 支影片倒轉中：標準化…`);$('prog').value=0;
+    const nv=`rvn${i}.mp4`,na=`rvn${i}.wav`;temps.push(nv,na);
+    let r=await f.exec(['-i',names[i],'-filter_complex',VF(x,0)+'[v]','-map','[v]','-an','-c:v','libx264','-preset','veryfast','-crf','16','-pix_fmt','yuv420p','-g',String(K),'-keyint_min',String(K),'-sc_threshold','0','-bf','0','-r',String(fps),'-fps_mode','cfr','-video_track_timescale','90000',nv]);
+    if(r!==0)throw new Error(`第 ${i+1} 支倒轉標準化失敗`);
+    const o={};await vdur(f,nv,o);const N=o.pk;if(!N)throw new Error(`第 ${i+1} 支倒轉標準化後沒有畫面`);
+    const T=N/fr;
+    r=await f.exec(['-i',names[i],'-filter_complex',AF({...x,vdur:T},0).replace(/apad,atrim=duration=[\d.]+/,`apad,atrim=end_sample=${Math.round(T*SR)}`).replace(/anullsrc=r=(\d+):cl=stereo,atrim=duration=[\d.]+/,`anullsrc=r=$1:cl=stereo,atrim=end_sample=${Math.round(T*SR)}`)+'[a]','-map','[a]','-c:a','pcm_s16le',na]);
+    if(r!==0)throw new Error(`第 ${i+1} 支倒轉音訊處理失敗`);
+    try{await f.deleteFile(names[i])}catch(e){}
+    const nc=Math.ceil(N/K),vl=[],al=[];
+    for(let j=nc-1;j>=0;j--){const s0=j*K,s1=Math.min(N,s0+K),a0=Math.round(s0/fr*SR),a1=Math.round(s1/fr*SR),cv=`rvc${i}_${j}.mp4`,ca=`rvc${i}_${j}.wav`;
+     status(`第 ${i+1} 支影片倒轉中：第 ${nc-j}/${nc} 段…`);$('prog').value=(nc-j)/nc;
+     r=await f.exec(['-ss',(Math.max(0,s0-0.5)/fr).toFixed(6),'-t',((s1-s0+0.5)/fr).toFixed(6),'-i',nv,'-frames:v',String(s1-s0),'-vf',`trim=end_frame=${s1-s0},reverse,setpts=N/FRAME_RATE/TB`,'-an','-c:v','libx264','-preset','veryfast','-crf','16','-pix_fmt','yuv420p','-r',String(fps),'-fps_mode','cfr','-bf','0','-video_track_timescale','90000',cv]);
+     if(r!==0)throw new Error(`第 ${i+1} 支倒轉第 ${j+1} 段失敗`);
+     r=await f.exec(['-i',na,'-af',`atrim=start_sample=${a0}:end_sample=${a1},asetpts=PTS-STARTPTS,areverse`,'-c:a','pcm_s16le',ca]);
+     if(r!==0)throw new Error(`第 ${i+1} 支倒轉第 ${j+1} 段音訊失敗`);
+     vl.push(cv);al.push(ca);temps.push(cv,ca);
+     if(j>0&&(nc-j)%5===0)await fresh([...inN.filter((n,k)=>k!==i),nv,na,...vl,...al])}
+    try{await f.deleteFile(nv)}catch(e){}try{await f.deleteFile(na)}catch(e){}
+    await f.writeFile(`rvl${i}.txt`,vl.map(n=>`file '${n}'`).join('\n'));await f.writeFile(`rva${i}.txt`,al.map(n=>`file '${n}'`).join('\n'));temps.push(`rvl${i}.txt`,`rva${i}.txt`);
+    const ro=`rv${i}.mov`;temps.push(ro);
+    r=await f.exec(['-f','concat','-safe','0','-i',`rvl${i}.txt`,'-f','concat','-safe','0','-i',`rva${i}.txt`,'-map','0:v:0','-map','1:a:0','-c','copy',ro]);
+    for(const n of [...vl,...al])try{await f.deleteFile(n)}catch(e){}
+    if(r!==0)throw new Error(`第 ${i+1} 支倒轉串接失敗`);
+    inN[i]=ro;RV[i]={...x,vi:0,ai:1,a:'pcm',hdr:false,vdur:T};await fresh(inN.map((n,k)=>k===i?ro:n));log(`第 ${i+1} 支已分段倒轉：${N} 格、${nc} 段、${T.toFixed(3)} 秒`)}
+   status('正在合併全部影片…');$('prog').value=0;
+   const args=[];inN.forEach(n=>args.push('-i',n));
+   info.forEach((x0,i)=>{const x=RV[i]||x0;fc+=VF(x,i)+`[v${i}];`;if(anyA)fc+=AF(x,i)+`[a${i}];`;cc+=`[v${i}]`+(anyA?`[a${i}]`:'')});
    fc+=`${cc}concat=n=${names.length}:v=1:a=${anyA?1:0}[v]`+(anyA?'[a]':'');
    args.push('-filter_complex',fc,'-map','[v]');if(anyA)args.push('-map','[a]');
    if(e0==='webm')args.push('-c:v','libvpx','-b:v','2M','-deadline','realtime','-cpu-used','8',...(anyA?['-c:a','libvorbis']:[]));
